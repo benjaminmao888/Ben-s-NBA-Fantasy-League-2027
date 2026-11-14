@@ -98,3 +98,29 @@ def test_player_summary_keeps_league_categories():
     s = fantasy.player_summary(p, ["PTS", "FG%"], 2027)
     assert s["season_avg"] == {"PTS": 20.0, "FG%": 0.512}
     assert s["last_7_avg"] == {} and s["lineup_slot"] == "BE"
+
+
+def test_games_played_live_and_limit():
+    raw = json.loads(json.dumps(RAW))
+    raw["settings"]["rosterSettings"] = {
+        "lineupSlotCounts": {"0": 1, "1": 1, "11": 3, "12": 6},
+        "lineupSlotStatLimits": {"0": {"limitValue": 82.0, "statId": 42},
+                                 "1": {"limitValue": 82.0, "statId": 42},
+                                 "2": {"limitValue": 82.0, "statId": 42},  # slot type not in use
+                                 "11": {"limitValue": 246.0, "statId": 42}},  # shared by 3 UTIL slots
+    }
+    raw["settings"]["rosterSettings"]["lineupSlotCounts"]["2"] = 0
+    assert fantasy.games_played_limit(raw) == 82 + 82 + 246
+    s = fantasy.parse_standings(raw)
+    assert s["games_played_limit"] == 410
+    live = fantasy.live_values(raw)
+    for t in raw["teams"]:
+        row = next(r for r in s["standings"] if r["abbrev"] == t["abbrev"])
+        assert row["games_played"] == int(live[t["id"]][fantasy.GP_STAT])
+        assert row["games_played"] >= t["valuesByStat"]["42"]  # settled + today's games
+        assert row["games_left"] == 410 - row["games_played"]
+
+
+def test_games_played_limit_missing_settings():
+    assert fantasy.games_played_limit(RAW) is None
+    assert all(r["games_left"] is None for r in fantasy.parse_standings(RAW)["standings"])

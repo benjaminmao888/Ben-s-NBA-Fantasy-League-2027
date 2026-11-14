@@ -77,3 +77,31 @@ def test_overload_retries_without_fallback(monkeypatch):
     p.client.models.generate_content = busy_twice
     assert p.step(p.start("sys", [Message("user", "q")]), None).text == "hi from main"
     assert n["i"] == 3
+
+
+def test_timeout_retries_once_then_reports_timeout(monkeypatch):
+    import httpx
+    import pytest
+
+    from app.llm.base import LLMError, _step
+
+    p = make(set(), monkeypatch)
+    real, n = p.client.models.generate_content, {"i": 0}
+
+    def slow(times):
+        def call(model, contents, config):
+            n["i"] += 1
+            if n["i"] <= times:
+                raise httpx.ReadTimeout("The read operation timed out")
+            return real(model, contents, config)
+        return call
+
+    p.client.models.generate_content = slow(1)
+    assert p.step(p.start("sys", [Message("user", "q")]), None).text == "hi from main"
+    assert n["i"] == 2
+
+    n["i"] = 0
+    p.client.models.generate_content = slow(99)
+    with pytest.raises(LLMError, match="超时"):
+        _step(p, p.start("sys", [Message("user", "q")]), None)
+    assert n["i"] == 1 + gemini_provider.TIMEOUT_RETRIES

@@ -21,6 +21,8 @@ COOLDOWN_SECONDS = 300
 OVERLOAD_WAITS = (5, 10, 20)
 # Free tier is rate-limited per minute; wait (up to this long) for the quota window instead of failing.
 MAX_RATE_LIMIT_WAIT = 30
+# A request that gets no reply within REQUEST_TIMEOUT_MS is usually a one-off stall: try it again this many times.
+TIMEOUT_RETRIES = 1
 _main_model_down_until = 0.0
 
 
@@ -39,14 +41,21 @@ class GeminiProvider:
         self.web_search = web_search
 
     def _call(self, model: str, state: dict[str, Any], config):
-        """One request, retrying brief overloads and per-minute rate limits."""
+        """One request, retrying timeouts, brief overloads and per-minute rate limits."""
+        import httpx
         from google.genai import errors
 
         overload_waits = list(OVERLOAD_WAITS)
+        timeout_retries = TIMEOUT_RETRIES
         rate_limited_once = False
         while True:
             try:
                 return self.client.models.generate_content(model=model, contents=state["contents"], config=config)
+            except httpx.TimeoutException:
+                if not timeout_retries:
+                    raise
+                timeout_retries -= 1
+                log.warning("%s timed out after %ds, retrying", model, REQUEST_TIMEOUT_MS // 1000)
             except errors.APIError as e:
                 if e.code in (503, 504) and overload_waits:
                     wait = overload_waits.pop(0)

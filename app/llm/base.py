@@ -89,7 +89,12 @@ def _step(provider: "LLMProvider", state: Any, tools: list[ToolSpec] | None) -> 
     except Exception as e:
         log.exception("LLM call failed")
         model = (state.get("model") if isinstance(state, dict) else None) or provider.model
-        hint = "请求太频繁/额度用完，稍等一分钟再试" if "429" in str(e) else "检查 API key、LLM_MODEL 模型名和额度"
+        if "timeout" in type(e).__name__.lower() or "timed out" in str(e):
+            hint = "模型响应超时，多半是服务端临时变慢，稍后再试"
+        elif "429" in str(e):
+            hint = "请求太频繁/额度用完，稍等一分钟再试"
+        else:
+            hint = "检查 API key、LLM_MODEL 模型名和额度"
         raise LLMError(f"{provider.name} / {model} 调用失败（{hint}）：{str(e)[:300]}") from None
 
 
