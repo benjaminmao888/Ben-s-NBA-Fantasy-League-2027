@@ -81,6 +81,7 @@ TOOLS: list[ToolSpec] = [
     ToolSpec(
         "get_fantasy_standings",
         "Fantasy Roto standings: rank, total roto points, change since last update, gap to first, "
+        "games played (GP) vs the season games-played limit and games left, "
         "and each category's value and roto points for every team.",
         _obj({}),
         fantasy.get_standings,

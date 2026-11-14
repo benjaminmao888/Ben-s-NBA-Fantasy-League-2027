@@ -101,6 +101,17 @@ def _raw_standings() -> dict:
 PCT_PARTS = {"19": ("13", "14"), "20": ("15", "16"), "21": ("17", "18")}
 BENCH_SLOTS = {12, 13}  # BE, IR
 TODAY_SPLIT = 5  # statSplitTypeId for a single scoring period's actual stats
+GP_STAT = "42"  # games played; Roto leagues cap it per active lineup slot
+
+
+def games_played_limit(raw: dict) -> int | None:
+    """Season games-played cap for a whole team. Each limit already covers all slots of its type
+    (e.g. 3 UTIL slots share one 246-game limit), so the caps of the slot types in use just add up."""
+    rs = raw.get("settings", {}).get("rosterSettings") or {}
+    counts = rs.get("lineupSlotCounts") or {}
+    caps = [lim["limitValue"] for slot, lim in (rs.get("lineupSlotStatLimits") or {}).items()
+            if str(lim.get("statId")) == GP_STAT and counts.get(slot, 0) > 0]
+    return int(sum(caps)) if caps else None
 
 
 def scoring_categories(raw: dict) -> list[dict[str, Any]]:
@@ -181,6 +192,7 @@ def parse_standings(raw: dict) -> dict[str, Any]:
     rank, prev_rank = _ranks(live), _ranks(prev)
     mgr = managers.load()
     leader = max(live.values(), default=0)
+    gp_limit = games_played_limit(raw)
     rows = [{
         "rank": rank[tid],
         "prev_rank": prev_rank[tid],
@@ -190,6 +202,8 @@ def parse_standings(raw: dict) -> dict[str, Any]:
         "roto_points": live[tid],
         "change": round(change[tid], 1),
         "gap_to_first": round(leader - live[tid], 1),
+        "games_played": int(values[tid].get(GP_STAT, 0)),
+        "games_left": None if gp_limit is None else gp_limit - int(values[tid].get(GP_STAT, 0)),
         "categories": {
             c["name"]: {"value": _fmt(c["name"], values[tid].get(c["stat_id"])),
                         "roto_points": cpts[tid][c["name"]]}
@@ -197,7 +211,7 @@ def parse_standings(raw: dict) -> dict[str, Any]:
         },
     } for tid, t in teams.items()]
     rows.sort(key=lambda r: (r["rank"], r["team"]))
-    return {"change_basis": basis, "standings": rows}
+    return {"change_basis": basis, "games_played_limit": gp_limit, "standings": rows}
 
 
 def parse_category_standings(raw: dict, category: str | None = None) -> dict[str, list[dict]]:
@@ -295,7 +309,9 @@ def get_standings() -> dict[str, Any]:
     return {
         "scoring_type": raw.get("settings", {}).get("scoringSettings", {}).get("scoringType"),
         "note": "Roto 实时排名（和 ESPN App 一致）：每个计分项按排名给分，总分 = 各项得分之和；"
-                "change 的含义见 change_basis，prev_rank 是变化之前的排名",
+                "change 的含义见 change_basis，prev_rank 是变化之前的排名；"
+                "games_played 是全队上场位置累计出战场次（含今天进行中的比赛），"
+                "games_played_limit 是整季上限，games_left 是剩余可用场次",
         **parse_standings(raw),
     }
 
